@@ -56,6 +56,18 @@ jobs:
           build-target-type: template_release
           em-version: "4.0.11"
 
+      - name: Verify WASM imports (no __cpp_exception)
+        if: ${{ matrix.gpu == 'cpu' }}
+        shell: bash
+        run: |
+          wasm_file=$(ls bin/addons/godot_whisper/bin/*.wasm | head -1)
+          if wasm-objdump -j Import -h "$wasm_file" 2>/dev/null | grep -q '__cpp_exception'; then
+            echo "ERROR: WASM imports __cpp_exception (incompatible with Godot web template)"
+            wasm-objdump -j Import -h "$wasm_file" | grep -E '__cpp_exception|__c_longjmp' || true
+            exit 1
+          fi
+          echo "OK: no __cpp_exception import in $wasm_file"
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:

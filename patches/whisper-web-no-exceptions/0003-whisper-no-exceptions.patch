@@ -1,0 +1,182 @@
+diff --git a/src/whisper.cpp b/src/whisper.cpp
+index 86bfafea..793c232c 100644
+--- a/src/whisper.cpp
++++ b/src/whisper.cpp
+@@ -1351,7 +1351,12 @@ static std::vector<ggml_backend_t> whisper_backend_init(const whisper_context_pa
+ 
+     ggml_backend_t backend_cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+     if (backend_cpu == nullptr) {
++#if defined(__EMSCRIPTEN__)
++        WHISPER_LOG_ERROR("%s: failed to initialize CPU backend\n", __func__);
++        return {};
++#else
+         throw std::runtime_error("failed to initialize CPU backend");
++#endif
+     }
+     result.push_back(backend_cpu);
+ 
+@@ -1424,7 +1429,11 @@ static bool weight_buft_supported(const whisper_hparams & hparams, ggml_tensor *
+ 
+                 ggml_context_ptr ctx_ptr { ggml_init(params) };
+                 if (!ctx_ptr) {
++#if defined(__EMSCRIPTEN__)
++                    return false;
++#else
+                     throw std::runtime_error("failed to create ggml context");
++#endif
+                 }
+                 ggml_context * ctx = ctx_ptr.get();
+ 
+@@ -1685,6 +1694,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
+     const size_t n_tensors = 10 /* input */ + 15 + 15*n_audio_layer + 24*n_text_layer;
+ 
+     std::map<ggml_backend_buffer_type_t, ggml_context *> ctx_map;
++    bool load_ok = true;
+     auto get_ctx = [&](ggml_backend_buffer_type_t buft) -> ggml_context * {
+         auto it = ctx_map.find(buft);
+         if (it == ctx_map.end()) {
+@@ -1696,7 +1706,13 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
+ 
+             ggml_context * ctx = ggml_init(params);
+             if (!ctx) {
++#if defined(__EMSCRIPTEN__)
++                WHISPER_LOG_ERROR("%s: failed to create ggml context\n", __func__);
++                load_ok = false;
++                return nullptr;
++#else
+                 throw std::runtime_error("failed to create ggml context");
++#endif
+             }
+ 
+             ctx_map[buft] = ctx;
+@@ -1715,10 +1731,19 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
+         ggml_op op = ASR_TENSOR_INFO.at(type);
+         ggml_backend_buffer_type_t buft = select_weight_buft(hparams, meta, op, buft_list);
+         if (!buft) {
++#if defined(__EMSCRIPTEN__)
++            WHISPER_LOG_ERROR("%s: failed to find a compatible buffer type for tensor %s\n", __func__, ASR_TENSOR_NAMES.at(system).at(type));
++            load_ok = false;
++            return nullptr;
++#else
+             throw std::runtime_error(format("failed to find a compatible buffer type for tensor %s", ASR_TENSOR_NAMES.at(system).at(type)));
++#endif
+         }
+ 
+         ggml_context * ctx = get_ctx(buft);
++        if (!ctx) {
++            return nullptr;
++        }
+         ggml_tensor * tensor = ggml_dup_tensor(ctx, meta);
+ 
+         model.tensors[format(ASR_TENSOR_NAMES.at(system).at(type), layer)] = tensor;
+@@ -1845,6 +1870,10 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
+         ggml_free(ctx);
+     }
+ 
++    if (!load_ok) {
++        return false;
++    }
++
+     // allocate tensors in the backend buffers
+     for (auto & p : ctx_map) {
+         ggml_backend_buffer_type_t buft = p.first;
+@@ -4476,7 +4505,11 @@ static bool weight_buft_supported(const whisper_vad_hparams & hparams, ggml_tens
+ 
+                 ggml_context_ptr ctx_ptr { ggml_init(params) };
+                 if (!ctx_ptr) {
++#if defined(__EMSCRIPTEN__)
++                    return false;
++#else
+                     throw std::runtime_error("failed to create ggml context");
++#endif
+                 }
+                 ggml_context * ctx = ctx_ptr.get();
+ 
+@@ -4839,6 +4872,7 @@ struct whisper_vad_context * whisper_vad_init_with_params(
+     const size_t n_tensors = hparams.n_encoder_layers * 2 + 4 + 2 + 1;
+ 
+     std::map<ggml_backend_buffer_type_t, ggml_context *> ctx_map;
++    bool load_ok = true;
+     auto get_ctx = [&](ggml_backend_buffer_type_t buft) -> ggml_context * {
+         auto it = ctx_map.find(buft);
+         if (it == ctx_map.end()) {
+@@ -4850,7 +4884,13 @@ struct whisper_vad_context * whisper_vad_init_with_params(
+ 
+             ggml_context * ctx = ggml_init(params);
+             if (!ctx) {
++#if defined(__EMSCRIPTEN__)
++                WHISPER_LOG_ERROR("%s: failed to create ggml context\n", __func__);
++                load_ok = false;
++                return nullptr;
++#else
+                 throw std::runtime_error("failed to create ggml context");
++#endif
+             }
+ 
+             ctx_map[buft] = ctx;
+@@ -4871,9 +4911,18 @@ struct whisper_vad_context * whisper_vad_init_with_params(
+         ggml_op op = VAD_TENSOR_OPS.at(type);
+         ggml_backend_buffer_type_t buft = select_weight_buft(hparams, meta, op, buft_list);
+         if (!buft) {
++#if defined(__EMSCRIPTEN__)
++            WHISPER_LOG_ERROR("%s: failed to find a compatible buffer type for tensor %s\n", __func__, VAD_TENSOR_NAMES.at(type));
++            load_ok = false;
++            return nullptr;
++#else
+             throw std::runtime_error(format("failed to find a compatible buffer type for tensor %s", VAD_TENSOR_NAMES.at(type)));
++#endif
+         }
+         ggml_context * ctx = get_ctx(buft);
++        if (!ctx) {
++            return nullptr;
++        }
+         ggml_tensor * tensor = ggml_dup_tensor(ctx, meta);
+         model.tensors[VAD_TENSOR_NAMES.at(type)] = tensor;
+ 
+@@ -4975,6 +5024,11 @@ struct whisper_vad_context * whisper_vad_init_with_params(
+         ggml_free(ctx);
+     }
+ 
++    if (!load_ok) {
++        delete vctx;
++        return nullptr;
++    }
++
+     // allocate tensors in the backend buffers
+     for (auto & p : ctx_map) {
+         ggml_backend_buffer_type_t buft = p.first;
+@@ -5359,12 +5413,16 @@ struct whisper_vad_segments * whisper_vad_segments_from_probs(
+     // Allocate final segments
+     std::vector<whisper_vad_segment> segments;
+     if (speeches.size() > 0) {
++#if defined(__EMSCRIPTEN__)
++        segments.resize(speeches.size());
++#else
+         try {
+             segments.resize(speeches.size());
+         } catch (const std::bad_alloc &) {
+             WHISPER_LOG_ERROR("%s: failed to allocate memory for final segments\n", __func__);
+             return nullptr;
+         }
++#endif
+     }
+ 
+     // Apply padding to segments and copy to final segments
+@@ -6688,6 +6746,9 @@ static bool whisper_vad(
+         WHISPER_LOG_INFO("%s: total duration of speech segments: %.2f seconds\n",
+                         __func__, (float)filtered_n_samples / WHISPER_SAMPLE_RATE);
+ 
++#if defined(__EMSCRIPTEN__)
++        filtered_samples.resize(total_samples_needed);
++#else
+         try {
+             filtered_samples.resize(total_samples_needed);
+         } catch (const std::bad_alloc & /* e */) {
+@@ -6695,6 +6756,7 @@ static bool whisper_vad(
+             whisper_vad_free_segments(vad_segments);
+             return false;
+         }
++#endif
+ 
+         int offset = 0;
+         for (int i = 0; i < (int)vad_segments->data.size(); i++) {

@@ -1,0 +1,22 @@
+diff --git a/ggml/src/ggml-backend-reg.cpp b/ggml/src/ggml-backend-reg.cpp
+index 05871092..e8986040 100644
+--- a/ggml/src/ggml-backend-reg.cpp
++++ b/ggml/src/ggml-backend-reg.cpp
+@@ -89,6 +89,9 @@
+ namespace fs = std::filesystem;
+ 
+ static std::string path_str(const fs::path & path) {
++#if defined(__EMSCRIPTEN__)
++    return path.string();
++#else
+     try {
+ #if defined(__cpp_lib_char8_t)
+         // C++20 and later: u8string() returns std::u8string
+@@ -101,6 +104,7 @@ static std::string path_str(const fs::path & path) {
+     } catch (...) {
+         return std::string();
+     }
++#endif
+ }
+ 
+ struct ggml_backend_reg_entry {

@@ -1,27 +1,21 @@
 #!/usr/bin/env python
+import glob
 import os
+import subprocess
 import sys
 
 env = SConscript("thirdparty/godot-cpp/SConstruct")
 # Clone the env so our modifications don't leak to godot-cpp's pending builds.
 env = env.Clone()
 
-# whisper.cpp/ggml uses try/catch (e.g. ggml-backend-reg.cpp), so re-enable
-# exceptions that godot-cpp 4.2+ disables by default.
+# whisper.cpp/ggml uses try/catch on native platforms (e.g. ggml-backend-reg.cpp).
+# Web builds keep godot-cpp's -fno-exceptions and apply patches so the WASM side
+# module does not import env.__cpp_exception (incompatible with Godot's template).
 if env.get("is_msvc", False):
     if ("_HAS_EXCEPTIONS", 0) in env.get("CPPDEFINES", []):
         env["CPPDEFINES"].remove(("_HAS_EXCEPTIONS", 0))
     env.Append(CXXFLAGS=["/EHsc"])
-elif env["platform"] == "web":
-    # Emscripten: godot-cpp uses -sSUPPORT_LONGJMP='wasm' (Wasm-based SJLJ),
-    # which is incompatible with -fexceptions (Emscripten JS-based EH).
-    # Use -fwasm-exceptions (native Wasm EH) which IS compatible with Wasm SJLJ.
-    cxxflags = env.get("CXXFLAGS", [])
-    if "-fno-exceptions" in cxxflags:
-        cxxflags.remove("-fno-exceptions")
-    env.Append(CXXFLAGS=["-fwasm-exceptions"])
-    env.Append(LINKFLAGS=["-fwasm-exceptions"])
-else:
+elif env["platform"] != "web":
     cxxflags = env.get("CXXFLAGS", [])
     if "-fno-exceptions" in cxxflags:
         cxxflags.remove("-fno-exceptions")
@@ -43,6 +37,34 @@ if env["platform"] == "ios":
         if isinstance(flag, str) and "-mios-simulator-version-min=" in flag:
             ccflags[i] = "-mios-simulator-version-min=13.0"
             break
+
+# ── Web: apply no-exceptions patches to whisper.cpp submodule ─────────────────
+def _apply_web_no_exceptions_patches():
+    whisper_submodule = os.path.abspath("thirdparty/whisper.cpp")
+    patch_dir = os.path.abspath("patches/whisper-web-no-exceptions")
+    for patch_path in sorted(glob.glob(os.path.join(patch_dir, "*.patch"))):
+        check = subprocess.run(
+            ["git", "-C", whisper_submodule, "apply", "--check", patch_path],
+            capture_output=True,
+        )
+        if check.returncode == 0:
+            subprocess.run(
+                ["git", "-C", whisper_submodule, "apply", patch_path],
+                check=True,
+            )
+        else:
+            reverse = subprocess.run(
+                ["git", "-C", whisper_submodule, "apply", "--reverse", "--check", patch_path],
+                capture_output=True,
+            )
+            if reverse.returncode != 0:
+                print("ERROR: failed to apply web patch %s" % patch_path)
+                if check.stderr:
+                    print(check.stderr.decode("utf-8", errors="replace"))
+                env.Exit(1)
+
+if env["platform"] == "web":
+    _apply_web_no_exceptions_patches()
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 whisper_dir = "thirdparty/whisper.cpp"
@@ -356,7 +378,6 @@ elif env["platform"] == "web":
         env.Append(CPPDEFINES=["GGML_USE_WEBGPU"])
         env.Append(CPPPATH=[webgpu_dir, webgpu_gen_dir])
         # Emscripten flags for Dawn WebGPU port
-        # Use -fwasm-exceptions (not -fexceptions) for compatibility with godot-cpp's -sSUPPORT_LONGJMP='wasm'
         env.Append(CCFLAGS=["--use-port=emdawnwebgpu"])
         env.Append(LINKFLAGS=["--use-port=emdawnwebgpu", "-sASYNCIFY"])
         sources.append(webgpu_dir + "/ggml-webgpu.cpp")
