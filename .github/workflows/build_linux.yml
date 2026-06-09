@@ -11,14 +11,18 @@ jobs:
         include:
           - precision: single
             arch: x86_64
+            os: ubuntu-24.04
           - precision: double
             arch: x86_64
+            os: ubuntu-24.04
           - precision: single
-            arch: aarch64
+            arch: arm64
+            os: ubuntu-24.04-arm
           - precision: double
-            arch: aarch64
+            arch: arm64
+            os: ubuntu-24.04-arm
 
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

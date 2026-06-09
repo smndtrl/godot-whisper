@@ -181,7 +181,16 @@ elif env["platform"] == "android":
         cpu_sources.append(cpu_dir + "/arch/x86/cpu-feats.cpp")
 elif env["platform"] == "web":
     cpu_sources.append(cpu_dir + "/arch/wasm/quants.c")
-elif env["platform"] in ["linux", "windows"]:
+elif env["platform"] == "linux":
+    if env["arch"] in ["arm64", "arm32"]:
+        cpu_sources.append(cpu_dir + "/arch/arm/quants.c")
+        cpu_sources.append(cpu_dir + "/arch/arm/repack.cpp")
+        cpu_sources.append(cpu_dir + "/arch/arm/cpu-feats.cpp")
+    else:
+        cpu_sources.append(cpu_dir + "/arch/x86/quants.c")
+        cpu_sources.append(cpu_dir + "/arch/x86/repack.cpp")
+        cpu_sources.append(cpu_dir + "/arch/x86/cpu-feats.cpp")
+elif env["platform"] == "windows":
     cpu_sources.append(cpu_dir + "/arch/x86/quants.c")
     cpu_sources.append(cpu_dir + "/arch/x86/repack.cpp")
     cpu_sources.append(cpu_dir + "/arch/x86/cpu-feats.cpp")
