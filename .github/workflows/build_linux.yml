@@ -13,6 +13,10 @@ jobs:
             arch: x86_64
           - precision: double
             arch: x86_64
+          - precision: single
+            arch: aarch64
+          - precision: double
+            arch: aarch64
 
     runs-on: ubuntu-24.04
     steps:
