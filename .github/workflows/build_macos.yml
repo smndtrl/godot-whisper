@@ -16,6 +16,9 @@ on:
       APPLE_DEV_APP_ID:
         required: true
 
+env:
+  GODOT_BASE_BRANCH: main
+
 jobs:
   build:
     strategy:
@@ -35,8 +38,9 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
+
       - name: 🔗 GDExtension Build
-        uses: godotengine/godot-cpp-template/.github/actions/build@f9564a9c8115139b9624692d39e358291f6d76ce
+        uses: ./.github/actions/scons-build
         with:
           platform: macos
           arch: ${{ matrix.arch }}
@@ -55,6 +59,7 @@ jobs:
           APPLE_DEV_TEAM_ID: ${{ secrets.APPLE_DEV_TEAM_ID }}
           APPLE_DEV_APP_ID: ${{ secrets.APPLE_DEV_APP_ID }}
         if: github.ref == 'refs/heads/main'
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
