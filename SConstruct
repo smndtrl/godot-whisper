@@ -27,6 +27,11 @@ else:
         cxxflags.remove("-fno-exceptions")
     env.Append(CXXFLAGS=["-fexceptions"])
 
+# GCC LTO on Linux ARM leaves llamafile sgemm load<float32x4_t> undefined at dlopen.
+if env["platform"] == "linux" and env["arch"] in ["arm64", "arm32"]:
+    for key in ("CCFLAGS", "LINKFLAGS"):
+        env[key] = [f for f in env.get(key, []) if not str(f).startswith("-flto")]
+
 # ggml-backend-reg.cpp uses std::filesystem which requires iOS 13.0+.
 # godot-cpp defaults to ios_min_version=12.0, so bump it.
 if env["platform"] == "ios":
@@ -104,6 +109,26 @@ ggml_core_sources = [
 ]
 sources.extend(ggml_core_sources)
 
+# ── Patch upstream bugs in whisper.cpp submodule ──────────────────────────────
+# sgemm.cpp has a known fp16 NEON guard bug (FIXME in source) that breaks arm32.
+# It checks !defined(_MSC_VER) instead of __ARM_FEATURE_FP16_VECTOR_ARITHMETIC.
+# Patch at build time so CI works without a custom submodule fork.
+_sgemm_path = cpu_dir + "/llamafile/sgemm.cpp"
+with open(_sgemm_path, "r") as f:
+    _sgemm_txt = f.read()
+_sgemm_patched = _sgemm_txt
+_sgemm_orig = '#if !defined(_MSC_VER)\n// FIXME: this should check for __ARM_FEATURE_FP16_VECTOR_ARITHMETIC'
+if _sgemm_orig in _sgemm_patched:
+    _sgemm_patched = _sgemm_patched.replace(
+        _sgemm_orig,
+        '#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) && !defined(_MSC_VER)')
+    _sgemm_patched = _sgemm_patched.replace(
+        '#endif // _MSC_VER\n#endif // __ARM_NEON',
+        '#endif // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC\n#endif // __ARM_NEON')
+if _sgemm_patched != _sgemm_txt:
+    with open(_sgemm_path, "w") as f:
+        f.write(_sgemm_patched)
+
 # ── ggml-cpu backend (always needed) ─────────────────────────────────────────
 # Same base-name conflict: ggml-cpu.c / ggml-cpu.cpp
 cpu_sources = [
@@ -119,8 +144,12 @@ cpu_sources = [
     cpu_dir + "/ops.cpp",
     cpu_dir + "/amx/amx.cpp",
     cpu_dir + "/amx/mmq.cpp",
-    cpu_dir + "/llamafile/sgemm.cpp",
 ]
+
+# llamafile sgemm uses load<V>() which GCC leaves undefined on Linux ARM at dlopen.
+if not (env["platform"] == "linux" and env["arch"] in ["arm64", "arm32"]):
+    env.Append(CPPDEFINES=["GGML_USE_LLAMAFILE"])
+    cpu_sources.append(_sgemm_path)
 
 # ── Architecture-specific CPU files ──────────────────────────────────────────
 if env["platform"] in ["macos", "ios"]:
@@ -196,24 +225,6 @@ elif env["platform"] == "windows":
     cpu_sources.append(cpu_dir + "/arch/x86/cpu-feats.cpp")
 
 sources.extend(cpu_sources)
-
-# ── Patch upstream bugs in whisper.cpp submodule ──────────────────────────────
-# sgemm.cpp has a known fp16 NEON guard bug (FIXME in source) that breaks arm32.
-# It checks !defined(_MSC_VER) instead of __ARM_FEATURE_FP16_VECTOR_ARITHMETIC.
-# Patch at build time so CI works without a custom submodule fork.
-_sgemm_path = cpu_dir + "/llamafile/sgemm.cpp"
-with open(_sgemm_path, "r") as f:
-    _sgemm_txt = f.read()
-_sgemm_orig = '#if !defined(_MSC_VER)\n// FIXME: this should check for __ARM_FEATURE_FP16_VECTOR_ARITHMETIC'
-if _sgemm_orig in _sgemm_txt:
-    _sgemm_txt = _sgemm_txt.replace(
-        _sgemm_orig,
-        '#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) && !defined(_MSC_VER)')
-    _sgemm_txt = _sgemm_txt.replace(
-        '#endif // _MSC_VER\n#endif // __ARM_NEON',
-        '#endif // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC\n#endif // __ARM_NEON')
-    with open(_sgemm_path, "w") as f:
-        f.write(_sgemm_txt)
 
 # ── whisper.cpp library itself ────────────────────────────────────────────────
 sources.append(whisper_dir + "/src/whisper.cpp")
